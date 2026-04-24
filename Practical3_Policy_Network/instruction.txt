@@ -1,0 +1,679 @@
+DAM303 Deep Reinforcement LearningPractical 3: Policy Network with PyTorch
+Practical 3
+Creating a Policy Network using PyTorch
+Overview
+In this practical you will build a neural network policy from scratch using PyTorch and train
+it on CartPole-v1.
+This is your first deep learning practical in the module — the policy network replaces the
+Q-table from Practical 2.
+You will implement the REINFORCE algorithm (Policy Gradient) end-to-end: network,
+action sampling, return calculation, and gradient update.
+This practical covers Unit 4 theory: policy functions, softmax output, log probabilities, and
+the REINFORCE update rule.
+1. Learning Objectives
+By the end of this practical you will be able to:
+•
+Set up PyTorch and the Gymnasium CartPole environment
+•
+Define a two-layer neural network policy using nn.Module
+•
+Sample actions from a softmax probability distribution output
+•
+Compute discounted returns for a full episode
+•
+Implement the REINFORCE policy gradient update using log probabilities
+•
+Train the policy for 500 episodes and plot the learning curve
+•
+Explain the role of the baseline in reducing training variance
+2. Background
+2.1 From Q-Table to Policy Network
+In Practical 2 you stored Q-values in a table: one row per state, one column per action. This
+works for small discrete state spaces (25 cells). CartPole has a continuous 4-dimensional
+state space — there are infinitely many possible states, so a table is impossible. Instead, we
+use a neural network that takes the state vector as input and outputs action probabilities
+directly. This is called a policy network.
+Practical 2 (Q-Table) Practical 3 (Policy Network)
+State: grid cell index (0-24) State: 4 continuous numbers
+Stores Q(s,a) explicitly in a
+table
+Approximates pi(a|s) with a neural net
+Update: Q-learning (TD error) Update: REINFORCE (policy gradient)
+CST | Spring Semester 2026 | Page 1
+DAM303 Deep Reinforcement LearningPractical 3: Policy Network with PyTorch
+Practical 2 (Q-Table) Practical 3 (Policy Network)
+Action: argmax of Q-values Action: sampled from softmax output
+No PyTorch needed Requires PyTorch autograd
+2.2 The CartPole Environment
+CartPole-v1 is the standard benchmark for policy gradient methods. A pole is balanced on a
+cart that can move left or right. The agent must keep the pole upright for as long as possible.
+Property Details
+Observation space 4 continuous values: cart position, cart velocity, pole angle,
+pole angular velocity
+Action space 2 discrete actions: 0 = push left, 1 = push right
+Reward +1 for every step the pole stays upright
+Episode ends Pole angle > 12 degrees, or cart moves out of bounds, or
+500 steps reached
+Solved threshold Average reward >= 475 over 100 consecutive episodes
+2.3 Policy Gradient — REINFORCE
+REINFORCE is the simplest policy gradient algorithm. The idea: run a full episode, then look
+back at every action taken and ask — given the return that followed, should this action be
+made more or less likely?
+The algorithm in five steps:
+1. Run one full episode under the current policy, collecting (state, action, reward) at
+each step
+2. Compute the discounted return G
+_
+t at each time step (working backwards from the
+end)
+3. For each step, compute the log probability of the action that was taken: log pi(a
+_
+t |
+s
+_
+t)
+4. Compute the loss: loss = -sum over t of G
+_
+t * log pi(a
+_
+t | s
+_
+t)
+5. Call loss.backward() and optimizer.step() to update the network weights
+Key Equations
+Discounted return from time t:
+G
+_
+t = r
+_
+t + gamma * r
+_{t+1} + gamma^2 * r
+_{t+2} + ...
+REINFORCE loss (we minimise this — note the negative sign):
+loss = - sum over t of [ G
+_
+t * log pi(a
+_
+t | s
+_
+t) ]
+CST | Spring Semester 2026 | Page 2
+DAM303 Deep Reinforcement LearningPractical 3: Policy Network with PyTorch
+Why negative? PyTorch minimises the loss. We want to maximise the expected return, which
+means maximising the sum of G
+_
+t * log pi. Maximising X is the same as minimising -X.
+Normalising the returns (baseline):
+G
+_
+t
+_
+normalised = (G
+_
+t - mean(G)) / (std(G) + 1e-8)
+This is not required for correctness but greatly stabilises training. It removes the effect of the
+absolute scale of rewards and centres the gradient signal around zero.
+2.4 PyTorch AutoDiff in 60 Seconds
+PyTorch tracks all operations on tensors that have requires
+_grad=True. When you call
+loss.backward(), it automatically computes the gradient of the loss with respect to every
+parameter in the network. You do not write the gradient equations by hand.
+PyTorch concept What it does
+nn.Module Base class for all neural network layers and models
+nn.Linear(in, out) Fully connected layer: output = input @ W + b
+F.relu(x) Rectified Linear Unit activation: max(0, x)
+F.softmax(x, dim=-1) Converts logits to probabilities that sum to 1
+torch.log(prob) Natural logarithm — used for log pi(a|s)
+dist.Categorical(probs) Discrete probability distribution for sampling
+dist.log_prob(action) log pi(a|s) for the sampled action
+optimizer.zero_grad() Clear gradients from the previous update
+loss.backward() Compute gradients via backpropagation
+optimizer.step() Update network weights using the computed gradients
+3. Environment Setup
+3.1 Installation
+Install the required packages:
+pip install torch torchvision
+pip install gymnasium
+pip install matplotlib numpy
+Verify everything works:
+import torch
+import gymnasium as gym
+CST | Spring Semester 2026 | Page 3
+DAM303 Deep Reinforcement LearningPractical 3: Policy Network with PyTorch
+import matplotlib.pyplot as plt
+import numpy as np
+env = gym.make('CartPole-v1')
+print('Observation space:'
+print('Action space: '
+print('PyTorch version: '
+, env.observation
+_
+space.shape) # (4,)
+, env.action
+_
+space.n) # 2
+, torch.
+version
+__
+__)
+Expected output
+Observation space: (4,)
+Action space: 2
+PyTorch version: 2.x.x (any recent version is fine)
+3.2 File Structure
+practical3/
+policy_
+network.py # The neural network policy class
+reinforce.py # REINFORCE training algorithm
+train.py # Main script: training loop and plots
+report/ # Your written report
+4. Tasks
+Instructions
+Complete all 5 tasks in order. Read each task fully before writing any code.
+CartPole-v1 is considered solved when the average reward over 100 consecutive episodes
+is >= 475.A well-implemented REINFORCE with 500 episodes should reach an average of
+150-300. Full solve takes ~1000+ episodes.
+Task 1: Define the Policy Network
+Create policy_
+network.py. Define a PolicyNetwork class using PyTorch's nn.Module. The
+network takes the 4-dimensional CartPole state as input and outputs a probability distribution
+over the 2 actions.
+Architecture:
+•
+•
+•
+•
+Input layer: 4 neurons (one per CartPole observation dimension)
+Hidden layer 1: 64 neurons with ReLU activation
+Hidden layer 2: 64 neurons with ReLU activation
+Output layer: 2 neurons with Softmax activation (one per action)
+Starter skeleton:
+import torch
+CST | Spring Semester 2026 | Page 4
+DAM303 Deep Reinforcement LearningPractical 3: Policy Network with PyTorch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.distributions import Categorical
+class PolicyNetwork(nn.Module):
+"""
+Two-layer fully connected policy network for CartPole.
+Input: state vector of size 4
+Output: action probabilities (softmax) of size 2
+"""
+def
+init
+__
+__(self, state
+_
+dim=4, action
+_
+dim=2, hidden
+_
+dim=64):
+super(PolicyNetwork, self).
+init
+__
+__()
+# TODO: define self.fc1 = nn.Linear(state
+_
+dim, hidden
+_
+# TODO: define self.fc2 = nn.Linear(hidden
+_
+dim, hidden
+_
+# TODO: define self.fc3 = nn.Linear(hidden
+_
+dim, action
+_
+dim)
+dim)
+dim)
+def forward(self, x):
+"""Forward pass: state tensor -> action probabilities.
+"""
+# TODO: x = F.relu(self.fc1(x))
+# TODO: x = F.relu(self.fc2(x))
+# TODO: x = F.softmax(self.fc3(x), dim=-1)
+# TODO: return x
+pass
+def select
+"""
+_
+action(self, state):
+Given a numpy state array, select an action and return
+the action and its log probability.
+"""
+# Convert state numpy array to a float tensor
+state
+_
+tensor = torch.FloatTensor(state)
+# Get action probabilities from forward pass
+probs = self.forward(state
+_
+tensor)
+# Create a categorical distribution and sample
+dist = Categorical(probs)
+action = dist.sample()
+# Return action as int and log prob as tensor (needed for gradient)
+return action.item(), dist.log_prob(action)
+Requirements for Task 1:
+•
+fc1, fc2, fc3 must all be nn.Linear layers with the correct dimensions
+•
+forward() must apply ReLU after fc1 and fc2, and Softmax after fc3
+•
+select
+_
+action() is fully provided — do not modify it
+•
+Test: create PolicyNetwork(), pass a random tensor of shape (4,) through forward(),
+verify output shape is (2,) and values sum to 1.0
+net = PolicyNetwork()
+test
+_
+state = torch.FloatTensor([0.1, 0.2,
+-0.1, 0.05])
+probs = net.forward(test
+_
+state)
+print(probs) # e.g. tensor([0.4832, 0.5168])
+print(probs.sum()) # must be 1.0
+Task 2: Implement the Return Calculation
+CST | Spring Semester 2026 | Page 5
+DAM303 Deep Reinforcement LearningPractical 3: Policy Network with PyTorch
+Create reinforce.py. Implement a function compute
+_
+returns() that takes the list of rewards
+collected during one episode and computes the discounted return G
+_
+t at each time step.
+Work backwards from the end of the episode.
+Starter skeleton:
+import torch
+def compute
+"""
+_
+returns(rewards, gamma=0.99):
+Compute discounted returns for each time step in the episode.
+rewards: list of floats, one per step
+gamma: discount factor
+Returns: torch.FloatTensor of shape (len(rewards),)
+"""
+returns = []
+G = 0
+# TODO: iterate backwards through rewards
+# TODO: G = reward + gamma * G
+# TODO: prepend G to returns list
+# TODO: convert returns to a FloatTensor and return it
+pass
+def normalise
+_
+returns(returns):
+"""Normalise returns to zero mean and unit variance.
+"""
+# TODO: subtract mean, divide by (std + 1e-8)
+# This reduces variance and stabilises training
+pass
+Requirements for Task 2:
+•
+•
+•
+•
+•
+Must iterate backwards: start with G=0, then G = reward + gamma * G at each step
+Prepend to list (not append) so the final list is in forward time order
+Or append and reverse at the end — both give the same result
+normalise
+_
+returns() must use: (returns - returns.mean()) / (returns.std() + 1e-8)
+The 1e-8 prevents division by zero when all rewards are equal
+Test your function with this example:
+rewards = [1, 1, 1] # three steps, each giving reward 1
+_
+returns(rewards, gamma=0.99)
+G = compute
+print(G)
+# Expected: tensor([2.9701, 1.9900, 1.0000])
+# G
+0 = 1 + 0.99*1 + 0.99^2*1 = 1 + 0.99 + 0.9801 = 2.9701
+_
+# G
+1 = 1 + 0.99*1 = 1 + 0.99 = 1.9900
+_
+# G
+2 = 1 = 1.0000
+_
+Task 3: Implement the REINFORCE Update
+Add a reinforce
+_
+update() function to reinforce.py. This function takes the log probabilities
+and returns from one episode, computes the REINFORCE loss, and runs one gradient
+update step.
+CST | Spring Semester 2026 | Page 6
+DAM303 Deep Reinforcement LearningPractical 3: Policy Network with PyTorch
+def reinforce
+"""
+_
+update(log_probs, returns, optimizer):
+Perform one REINFORCE gradient update.
+log_probs: list of log probability tensors, one per step
+returns: FloatTensor of discounted returns, one per step
+optimizer: the PyTorch optimiser (e.g. Adam)
+"""
+# Step 1: Stack log_probs into a single tensor
+log_probs
+_
+tensor = torch.stack(log_probs)
+# Step 2: Compute the REINFORCE loss
+# loss = -sum(G
+_
+t * log pi(a
+_
+t))
+# TODO: loss = -torch.sum(returns * log_probs
+_
+tensor)
+# Step 3: Backpropagate and update weights
+# TODO: optimizer.zero
+_grad()
+# TODO: loss.backward()
+# TODO: optimizer.step()
+return loss.item() # return the scalar loss for logging
+Requirements for Task 3:
+•
+torch.stack(log_probs) converts a Python list of 0-d tensors into a 1-D tensor
+•
+The loss must be -torch.sum(returns * log_probs
+_
+tensor) — not mean, sum
+•
+optimizer.zero
+_grad() must come BEFORE loss.backward(), not after
+•
+The order is always: zero
+_grad() → backward() → step()
+Why zero
+_grad() first? PyTorch accumulates gradients by default. If you forget to zero them,
+the new gradients add on top of the old ones and the update will be wrong.
+Task 4: Write the Training Loop
+Create train.py. Combine the policy network, environment, return computation, and update
+function into a full training loop for 500 episodes. Track and print episode rewards.
+Complete training script:
+import torch
+import torch.optim as optim
+import gymnasium as gym
+import numpy as np
+import matplotlib.pyplot as plt
+from policy_
+network import PolicyNetwork
+from reinforce import compute
+_
+returns, normalise
+_
+returns, reinforce
+_
+update
+# --- Configuration ---
+N
+EPISODES = 500
+_
+GAMMA = 0.99
+LEARNING
+RATE= 0.001
+_
+USE
+BASELINE = True # set False to see effect of no normalisation
+_
+# --- Initialise ---
+env = gym.make('CartPole-v1')
+CST | Spring Semester 2026 | Page 7
+DAM303 Deep Reinforcement LearningPractical 3: Policy Network with PyTorch
+policy = PolicyNetwork(state
+_
+dim=4, action
+_
+dim=2, hidden
+_
+optim
+_
+= optim.Adam(policy.parameters(), lr=LEARNING
+_
+RATE)
+dim=64)
+all
+_
+rewards = []
+# --- Training loop ---
+for ep in range(N
+_
+EPISODES):
+state, _
+= env.reset()
+log_probs = []
+rewards = []
+# --- Run one episode ---
+done = False
+while not done:
+action, log_prob = policy.select
+_
+action(state)
+state, reward, terminated, truncated, _
+= env.step(action)
+done = terminated or truncated
+log_probs.append(log_prob)
+rewards.append(reward)
+# --- Compute returns ---
+returns = compute
+_
+returns(rewards, gamma=GAMMA)
+if USE
+BASELINE:
+_
+returns = normalise
+_
+returns(returns)
+# --- Update policy ---
+loss = reinforce
+_
+update(log_probs, returns, optim
+_)
+# --- Logging ---
+ep_
+reward = sum(rewards)
+all
+_
+rewards.append(ep_
+reward)
+if (ep + 1) % 50 == 0:
+avg = np.mean(all
+_
+rewards[-50:])
+print(f'Episode {ep+1:4d} | Reward: {ep_
+reward:6.1f} | Avg(50):
+{avg:6.1f} | Loss: {loss:.4f}')
+env.close()
+# --- Plot reward curve ---
+window = 20
+smoothed = np.convolve(all
+_
+rewards, np.ones(window)/window, mode=
+'valid')
+plt.figure(figsize=(10, 5))
+plt.plot(all
+_
+rewards, alpha=0.3, label=
+'Episode reward')
+plt.plot(range(window-1, N
+_
+EPISODES), smoothed, label=f'{window}-ep moving
+average')
+plt.axhline(y=475, color=
+'black'
+, linestyle=
+'
+'
+--
+, label=
+'Solved threshold
+(475)')
+plt.xlabel('Episode')
+plt.ylabel('Total reward')
+plt.title('REINFORCE on CartPole-v1')
+plt.legend()
+plt.tight
+_
+layout()
+plt.savefig('cartpole
+_
+reinforce.png'
+, dpi=150)
+plt.show()
+print('Done. Saved cartpole
+_
+reinforce.png')
+Requirements for Task 4:
+CST | Spring Semester 2026 | Page 8
+DAM303 Deep Reinforcement LearningPractical 3: Policy Network with PyTorch
+•
+•
+•
+•
+•
+The training loop must handle both terminated and truncated flags from Gymnasium
+— done = terminated or truncated
+log_probs and rewards must be reset to empty lists at the start of each episode
+compute
+returns and reinforce
+_
+_
+update must be imported and called correctly
+The plot must be saved with plt.savefig()
+Run the script and verify that the reward trend increases over 500 episodes
+Task 5: Experiments and Analysis
+Run experiments to understand how each component of REINFORCE affects learning. For
+each experiment, re-run train.py with the modified settings and compare the reward curves.
+Experiment A — Effect of the baseline (return normalisation):
+•
+Run with USE
+_
+BASELINE = True (default)
+•
+Run with USE
+BASELINE = False
+•
+•
+_
+Plot both curves on the same figure
+Question: which converges faster? Why does normalisation help?
+Experiment B — Effect of the discount factor gamma:
+•
+Run with gamma = 0.99 (default — very patient)
+•
+Run with gamma = 0.90
+•
+Run with gamma = 0.50 (impatient)
+•
+Question: what happens to the reward curve with gamma=0.5? Does the agent still
+learn?
+Experiment C — Effect of the learning rate:
+•
+Run with lr = 0.001 (default)
+•
+Run with lr = 0.01 (10x larger)
+•
+Run with lr = 0.0001 (10x smaller)
+•
+Question: does lr=0.01 learn faster or does it become unstable?
+Extension (optional)
+Add a value baseline: train a second small network V(s) to predict the return, subtract it
+from G
+_
+t before the policy update.
+This is the Advantage Actor-Critic idea from Unit 5. Does it improve stability over return
+normalisation?
+Try rendering one episode after training: env = gym.make('CartPole-v1'
+,
+render
+_
+mode='human')
+5. Expected Output
+When train.py runs successfully, you should see printed output similar to:
+CST | Spring Semester 2026 | Page 9
+DAM303 Deep Reinforcement LearningPractical 3: Policy Network with PyTorch
+Episode 50 | Reward: 24.0 | Avg(50): 21.4 | Loss: 23.4512
+Episode 100 | Reward: 38.0 | Avg(50): 32.1 | Loss: 31.2087
+Episode 150 | Reward: 67.0 | Avg(50): 55.8 | Loss: 54.9341
+Episode 200 | Reward: 112.0 | Avg(50): 89.3 | Loss: 87.1203
+Episode 300 | Reward: 189.0 | Avg(50): 145.7 | Loss: 143.2900
+Episode 400 | Reward: 243.0 | Avg(50): 198.4 | Loss: 196.8012
+Episode 500 | Reward: 312.0 | Avg(50): 267.1 | Loss: 264.3110
+Done. Saved cartpole
+_
+reinforce.png
+Note: REINFORCE is stochastic. Your exact numbers will differ. The important thing is the
+upward trend in Avg(50).
+Key things to verify:
+•
+Rewards in first 50 episodes are low (20-50) — the policy starts random
+•
+Rewards in last 50 episodes are much higher (200-400) — the policy has learned
+•
+Loss values increase with episode length — this is expected, since more steps
+means more log prob terms
+•
+The saved plot shows a clear upward trend with the 20-episode moving average
+6. Understanding the Gradient Update (Conceptual
+Walkthrough)
+This section walks through what happens numerically in one policy update so you
+understand what PyTorch is computing behind the scenes.
+Suppose after episode 1 the agent took 3 steps before the pole fell:
+Step 0: state=[0.01, 0.02, -0.01, 0.03], action=Right, reward=+1
+Step 1: state=[0.02, 0.14, -0.02, -0.10], action=Left, reward=+1
+Step 2: state=[0.05, -0.05, -0.04, 0.15], action=Right, reward=+1
+(pole fell — episode over)
+Step A — Compute returns (gamma=0.99)
+G_2 = 1.0
+G_1 = 1 + 0.99 * 1.0 = 1.99
+G_0 = 1 + 0.99 * 1.99 = 2.9701
+Step B — Normalise returns
+mean(G) = (2.9701 + 1.99 + 1.0) / 3 = 1.987
+std(G) = 0.807 (approx)
+G_0_norm = (2.9701 - 1.987) / 0.807 = +1.218
+G_1_norm = (1.990 - 1.987) / 0.807 = +0.004
+G_2_norm = (1.000 - 1.987) / 0.807 = -1.223
+CST | Spring Semester 2026 | Page 10
+DAM303 Deep Reinforcement LearningPractical 3: Policy Network with PyTorch
+Step C — Compute log probabilities
+Suppose the policy output these probabilities at each step:
+Step 0: pi(Left)=0.45, pi(Right)=0.55 => action=Right => log(0.55) =
+-0.598
+Step 1: pi(Left)=0.52, pi(Right)=0.48 => action=Left => log(0.52) =
+-0.654
+Step 2: pi(Left)=0.49, pi(Right)=0.51 => action=Right => log(0.51) =
+-0.673
+Step D — Compute the REINFORCE loss
+loss = -[ G_0_norm * log_pi_0 + G_1_norm * log_pi_1 + G_2_norm *
+log_pi_2 ]
+loss = -[ 1.218*(-0.598) + 0.004*(-0.654) + (-1.223)*(-0.673) ]
+loss = -[ -0.728 + -0.003 + 0.823 ]
+loss = -[ 0.092 ]
+loss = -0.092
+PyTorch calls loss.backward() and computes how each weight in the network contributed to
+this loss. The Adam optimizer then nudges the weights to make the loss more negative
+(which means making it more positive before the negation — i.e. increasing the probability of
+good actions).
+The first episode is tiny (3 steps). As the policy improves and episodes get longer, the
+magnitude of the returns and the loss both increase — which is why loss values grow with
+episode length.
+7. Report Structure
+1. Introduction: explain in your own words the difference between Q-learning (Practical
+2) and policy gradient (Practical 3)
+2. Network Architecture : describe or draw the three layers, state the input/output
+dimensions, and explain why Softmax is used at the output
+3. REINFORCE Algorithm : explain the five steps of REINFORCE in plain language
+4. Results : include your reward curve from the default settings. Describe the learning
+trend
+5. Experiments : answer the three experiment questions with supporting plots
+6. Reflection : what was the most difficult part to implement? What would you change?
+CST | Spring Semester 2026 | Page 11
