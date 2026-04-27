@@ -1,0 +1,820 @@
+DAM303 Deep Reinforcement Learning Practical 5: Distributional DQN
+Practical 5
+Implementing a Distributional DQN (C51)
+Overview
+In this practical you will implement C51 (Categorical DQN), also called Distributional DQN.
+Standard DQN predicts a single Q-value E[G|s,a]. C51 predicts the full probability
+distribution over possible returns.
+The distribution is represented as K=51 atoms spread between V
+min and V
+max.
+_
+_
+You will train C51 on CartPole-v1 and compare it to standard Q-learning from Practical 2.
+Submission: push all code to version control before the start of Practical 6.
+1. Learning Objectives
+By the end of this practical you will be able to:
+•
+Explain the difference between expected-value DQN and distributional DQN
+•
+Implement a network that outputs K probability distributions (one per action)
+•
+Implement the distributional Bellman projection (the C51 target update)
+•
+Sample actions by computing the expected Q-value from the distribution
+•
+Train C51 on CartPole-v1 and plot the reward curve
+•
+Describe why a distributional agent has richer information than a standard agent
+2. Background
+2.1 Why Distribution Over Return?
+Standard DQN learns Q(s,a) = E[G|s,a] — a single number. But the actual return is random
+(because the environment or the policy may be stochastic). C51 learns Z(s,a) — a full
+probability distribution over G. The expected value of Z gives the same number as Q, but the
+full distribution tells you much more: is the return reliably around 10, or is it bimodal
+(sometimes -50, sometimes +50)?
+Standard DQN Distributional DQN (C51)
+Predicts: E[G|s,a] (one
+number)
+Predicts: P(G=z
+_
+i | s,a) for K atoms
+Loss: MSE on Q-value Loss: KL divergence on distribution
+Action: argmax Q(s,a) Action: argmax E[Z(s,a)] = argmax sum(z
+_
+i * p_
+i)
+Output shape: (n_actions,) Output shape: (n
+_
+actions, K)
+Loses information about
+variance
+Captures variance, multimodality, risk
+CST | Spring Semester 2026 | Page 1
+DAM303 Deep Reinforcement Learning Practical 5: Distributional DQN
+2.2 C51 Setup
+C51 divides the return axis into K=51 equally spaced atoms between V
+min and V
+_
+_
+max:
+delta
+_
+z = (V
+max - V
+_
+_
+min) / (K - 1)
+z
+i = V
+min + i * delta
+_
+_
+_
+z for i = 0, 1, ..., K-1
+The network outputs logits for each (action, atom) pair, converted to probabilities via Softmax
+per action:
+p_
+i(s,a) = softmax( logits(s,a) )_
+i
+The expected Q-value for action a in state s is:
+Q(s,a) = sum
+_
+i [ z
+_
+i * p_
+i(s,a) ]
+2.3 The Distributional Bellman Projection
+Updating the distribution is more involved than the standard TD update. After taking action a
+in state s, receiving reward r, and landing in s'
+, the target distribution is constructed by
+projecting the next-state distribution onto the support:
+1. For each atom z
+_j of the next-state distribution: compute the projected atom T
+z
+_
+_j =
+clip(r + gamma * z
+_j, V
+min, V
+_
+_
+max)
+2. Find the two nearest atoms z
+l and z
+_
+_
+u on the current support that bracket T
+z
+_
+_j
+3. Distribute the probability p_j(s'
+, a*) proportionally between z
+l and z
+u
+_
+_
+4. Train the network to minimise KL divergence between the projected target and the
+predicted distribution
+For this practical, a simplified version using cross-entropy loss on the projected distribution is
+acceptable and produces correct gradients.
+3. File Structure and Setup
+practical5/
+c51
+_
+network.py # C51 neural network
+replay_
+buffer.py # Experience replay buffer
+c51
+_
+agent.py # Agent: action selection, projection, update
+train.py # Training loop and plotting
+report/
+Installation
+pip install torch gymnasium matplotlib numpy
+No additional packages needed beyond Practical 3 setup.
+4. Tasks
+CST | Spring Semester 2026 | Page 2
+DAM303 Deep Reinforcement Learning Practical 5: Distributional DQN
+Instructions
+carefully.
+correctly.
+Complete Tasks 1-5. The distributional projection in Task 3 is the hardest part — read it
+CartPole-v1 solves faster with C51 than with standard Q-learning once implemented
+Test each component individually before integrating into the training loop.
+Task 1: Build the C51 Network
+Create c51
+_
+network.py. The network takes a state as input and outputs a (n
+_
+tensor — one probability distribution per action.
+actions x K)
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+class C51Network(nn.Module):
+"""
+C51 (Categorical DQN) network.
+Output: probability distribution over K atoms for each action.
+"""
+def
+init
+__
+__(self, state
+_
+dim=4, action
+_
+dim=2, n
+_
+atoms=51,
+v
+_
+min=-10.0, v
+_
+max=10.0, hidden
+_
+dim=128):
+super(C51Network, self).
+init
+__
+__()
+self.action
+dim = action
+dim
+_
+_
+self.n
+atoms = n
+atoms
+_
+_
+self.v
+min = v
+min
+_
+_
+self.v
+max = v
+max
+_
+_
+# Support: the K atom values on the return axis
+self.register
+_
+buffer('support'
+,
+torch.linspace(v
+_
+min, v
+_
+max, n
+_
+atoms))
+# TODO: fc1 = Linear(state
+_
+dim, hidden
+_
+dim)
+# TODO: fc2 = Linear(hidden
+_
+dim, hidden
+_
+dim)
+# TODO: fc3 = Linear(hidden
+_
+dim, action
+dim * n
+_
+_
+atoms)
+def forward(self, x):
+# TODO: pass x through fc1 (ReLU), fc2 (ReLU), fc3
+# TODO: reshape output to (batch, action
+_
+dim, n
+_
+atoms)
+# TODO: apply softmax on dim=-1 (normalise each action's distribution)
+# TODO: return shape: (batch, action
+_
+dim, n
+_
+atoms)
+pass
+def get
+_q_
+values(self, x):
+"""Compute expected Q-value for each action: sum(z
+_
+i * p_
+i).
+probs = self.forward(x) # (batch, action
+_
+dim, n
+_
+# TODO: q = (probs * self.support).sum(dim=-1)
+# TODO: return q # shape: (batch, action
+_
+dim)
+pass
+"""
+atoms)
+Requirements for Task 1:
+•
+•
+•
+fc3 output size must be action
+dim * n
+_
+_
+atoms (e.g. 2 * 51 = 102 for CartPole)
+Reshape fc3 output from (batch, action
+dim*n
+_
+_
+atoms) to (batch, action
+dim,
+_
+n
+_
+atoms) using .view()
+Softmax must be applied on dim=-1 (across the K atoms for each action
+independently)
+CST | Spring Semester 2026 | Page 3
+DAM303 Deep Reinforcement Learning Practical 5: Distributional DQN
+•
+•
+register
+_
+buffer('support'
+, ...) ensures the atom values move to GPU automatically if
+you use CUDA
+Test: pass a (4,) state tensor, confirm get
+_q_
+values() returns shape (1, 2)
+Task 2: Build the Experience Replay Buffer
+Create replay_
+buffer.py. C51 uses experience replay (like DQN from Practical 2) to break
+temporal correlations. Implement a simple circular buffer that stores (s, a, r, s'
+, done)
+transitions and returns random batches.
+import numpy as np
+import random
+class ReplayBuffer:
+def
+init
+__
+__(self, capacity=10000):
+self.capacity = capacity
+self.buffer = []
+self.pos = 0
+def push(self, state, action, reward, next
+_
+state, done):
+if len(self.buffer) < self.capacity:
+self.buffer.append(None)
+self.buffer[self.pos] = (state, action, reward, next
+_
+self.pos = (self.pos + 1) % self.capacity
+state, done)
+def sample(self, batch
+_
+size):
+batch = random.sample(self.buffer, batch
+_
+size)
+states, actions, rewards, next
+_
+states, dones = zip(*batch)
+return (np.array(states), np.array(actions),
+np.array(rewards,dtype=np.float32),
+np.array(next
+_
+states), np.array(dones, dtype=np.float32))
+def
+len
+__
+__(self):
+return len(self.buffer)
+Requirements for Task 2:
+•
+The buffer is a circular queue — when full, new entries overwrite the oldest
+•
+sample() must return numpy arrays, not lists, so they can be converted to tensors
+efficiently
+•
+Test: push 20 transitions, sample a batch of 8, verify shapes
+Task 3: Implement the Distributional Projection and Update
+Create c51
+_
+agent.py. Implement the distributional Bellman projection. This is the core of
+C51 — it creates the target distribution by projecting the next-state distribution onto the
+support.
+import torch
+import torch.nn.functional as F
+import numpy as np
+def project
+_
+distribution(next
+_
+dist, rewards, dones, support,
+gamma=0.99, v
+_
+min=-10.0, v
+_
+max=10.0, n
+_
+atoms=51):
+"""
+Project the next-state distribution onto the current support.
+CST | Spring Semester 2026 | Page 4
+DAM303 Deep Reinforcement Learning Practical 5: Distributional DQN
+next
+_
+dist: (batch, n
+_
+atoms) — distribution of best action in s'
+rewards: (batch,)
+dones: (batch,)
+Returns: (batch, n
+_
+atoms) — projected target distribution
+"""
+batch
+delta
+_
+size = rewards.shape[0]
+_
+z = (v
+max - v
+_
+_
+min) / (n
+_
+atoms - 1)
+# Compute T
+_
+z = clip(r + gamma*(1-done)*z
+_j, v
+_
+min, v
+_
+max)
+# support shape: (n
+_
+atoms,) -> broadcast to (batch, n
+_
+atoms)
+rewards
+_
+b = rewards.unsqueeze(1) # (batch, 1)
+dones
+_
+b = dones.unsqueeze(1) # (batch, 1)
+Tz = rewards
+_
+b + gamma * (1 - dones
+_
+b) * support.unsqueeze(0)
+Tz = Tz.clamp(v
+_
+min, v
+_
+max) # (batch, n
+_
+atoms)
+# Find lower and upper atom indices for each projected value
+b = (Tz - v
+_
+min) / delta
+z # float index
+_
+l = b.floor().long().clamp(0, n
+_
+atoms - 1) # lower index
+u = b.ceil().long().clamp(0, n
+_
+atoms - 1) # upper index
+# Distribute probability between lower and upper atoms
+target = torch.zeros(batch
+_
+size, n
+_
+atoms)
+# TODO: for each atom j, add next
+_
+dist[:,j] * (u-b)[:,j] to target[:,
+l[:,j]]
+u[:,j]]
+readable)
+# TODO: for each atom j, add next
+_
+dist[:,j] * (b-l)[:,j] to target[:,
+# Hint: use a loop over j from 0 to n
+atoms
+_
+# (A vectorised version is optional — the loop version is correct and
+return target
+def c51
+_
+update(network, target
+_
+network, optimizer, batch,
+support, gamma=0.99, v
+_
+min=-10.0, v
+_
+max=10.0, n
+_
+states, actions, rewards, next
+_
+states, dones = batch
+states
+_
+t = torch.FloatTensor(states)
+next
+states
+_
+_
+t = torch.FloatTensor(next
+_
+states)
+rewards
+_
+t = torch.FloatTensor(rewards)
+dones
+_
+t = torch.FloatTensor(dones)
+actions
+_
+t = torch.LongTensor(actions)
+atoms=51):
+with torch.no
+_grad():
+# Get next-state distributions from target network
+next
+_probs = target
+_
+network(next
+states
+_
+_
+t) # (batch, actions, atoms)
+# Select greedy action in next state using expected Q
+next
+_q = (next
+_probs * support).sum(dim=-1) # (batch, actions)
+next
+a = next
+_
+_q.argmax(dim=1) # (batch,)
+# Extract distribution for greedy action
+next
+dist = next
+_
+_probs[range(len(next
+_
+a)), next
+_
+a] # (batch, atoms)
+# Project onto support
+target
+_
+dist = project
+_
+next
+dist, rewards
+distribution(
+t, dones
+min, v
+_
+_
+_
+t, support, gamma, v
+_
+_
+max,
+n
+_
+atoms)
+# Get current predicted distribution for actions taken
+current
+_probs = network(states
+_
+t) # (batch, actions, atoms)
+current
+dist = current
+_
+_probs[range(len(actions
+_
+t)), actions
+_
+t] # (batch,
+atoms)
+CST | Spring Semester 2026 | Page 5
+DAM303 Deep Reinforcement Learning Practical 5: Distributional DQN
+# Cross-entropy loss between target and predicted distribution
+# TODO: loss = -torch.sum(target
+_
+dist * torch.log(current
+_
+dim=-1).mean()
+# TODO: optimizer.zero
+_grad()
+# TODO: loss.backward()
+# TODO: optimizer.step()
+# TODO: return loss.item()
+pass
+dist + 1e-8),
+Requirements for Task 3:
+•
+The projection loop iterates over each atom j and distributes p_j(s'
+,a*) proportionally
+to atoms l and u
+•
+Use torch.no
+_grad() when computing the target distribution — target network should
+not receive gradients
+•
+Cross-entropy loss: -sum(target * log(pred + 1e-8), dim=-1).mean() — the +1e-8
+prevents log(0)
+•
+target
+_
+dist must sum to 1 per sample — verify with target.sum(dim=-1) after
+projection
+Task 4: Write the Training Loop with Target Network
+Create train.py. Train C51 on CartPole-v1 for 400 episodes. Use a target network (copied
+from the main network every 10 episodes) for stable training.
+import torch
+import torch.optim as optim
+import gymnasium as gym
+import numpy as np
+import matplotlib.pyplot as plt
+import copy
+from c51
+_
+network import C51Network
+from replay_
+buffer import ReplayBuffer
+from c51
+_
+agent import c51
+_
+update
+# --- Config ---
+N
+EPISODES = 400
+_
+GAMMA = 0.99
+LR = 0.0003
+BATCH
+SIZE = 64
+_
+BUFFER
+SIZE = 10000
+_
+EPSILON = 1.0
+EPSILON
+DECAY = 0.995
+_
+EPSILON
+MIN = 0.01
+_
+TARGET
+_
+UPDATE = 10 # copy target network every N episodes
+N
+ATOMS = 51
+_
+V
+_
+MIN, V
+_
+MAX = -10.0, 10.0
+LEARN
+_
+START = 200 # steps before learning begins
+env = gym.make('CartPole-v1')
+network = C51Network(state
+_
+dim=4, action
+_
+v
+min=V
+_
+_
+MIN, v
+max=V
+_
+_
+dim=2, n
+MAX)
+atoms=N
+_
+_
+target
+_
+n = copy.deepcopy(network)
+target
+_
+n.eval()
+optimizer = optim.Adam(network.parameters(), lr=LR)
+ATOMS,
+CST | Spring Semester 2026 | Page 6
+DAM303 Deep Reinforcement Learning Practical 5: Distributional DQN
+buffer = ReplayBuffer(BUFFER
+_
+SIZE)
+all
+rewards, total
+_
+_
+steps = [], 0
+for ep in range(N
+_
+EPISODES):
+state, _
+= env.reset()
+ep_
+reward = 0
+done = False
+while not done:
+# Epsilon-greedy action selection using expected Q
+if np.random.rand() < EPSILON:
+action = env.action
+_
+space.sample()
+else:
+with torch.no
+_grad():
+q = network.get
+_q_
+values(torch.FloatTensor(state).unsqueeze(0))
+action = q.argmax(dim=-1).item()
+next
+_
+state, reward, terminated, truncated, _
+= env.step(action)
+done = terminated or truncated
+buffer.push(state, action, reward, next
+_
+state, float(done))
+state = next
+state
+_
+ep_
+reward += reward
+total
+_
+steps += 1
+if total
+_
+steps >= LEARN
+_
+START and len(buffer) >= BATCH
+_
+batch = buffer.sample(BATCH
+_
+SIZE)
+c51
+_
+update(network, target
+_
+n, optimizer, batch,
+network.support, GAMMA, V
+_
+MIN, V
+_
+MAX, N
+_
+SIZE:
+ATOMS)
+EPSILON = max(EPSILON
+_
+MIN, EPSILON * EPSILON
+_
+all
+_
+rewards.append(ep_
+reward)
+DECAY)
+if (ep+1) % TARGET
+UPDATE == 0:
+_
+target
+n.load
+state
+_
+_
+_
+dict(network.state
+_
+dict())
+if (ep+1) % 50 == 0:
+avg = np.mean(all
+_
+rewards[-50:])
+print(f'Ep {ep+1:4d} | Reward: {ep_
+reward:6.1f} | Avg(50):
+{avg:6.1f} | Eps: {EPSILON:.3f}')
+env.close()
+# Plot
+window = 20
+smoothed = np.convolve(all
+_
+rewards, np.ones(window)/window, mode=
+'valid')
+plt.figure(figsize=(10,5))
+plt.plot(all
+_
+rewards, alpha=0.3, label=
+'Episode reward')
+plt.plot(range(window-1, N
+_
+EPISODES), smoothed, label=f'{window}-ep average')
+plt.axhline(y=475, color=
+'black'
+, linestyle=
+'
+'
+--
+, label=
+'Solved (475)')
+plt.xlabel('Episode'); plt.ylabel('Reward'); plt.title('C51 on CartPole-v1')
+plt.legend(); plt.tight
+_
+layout()
+plt.savefig('c51
+_
+cartpole.png'
+, dpi=150); plt.show()
+Task 5: Compare C51 vs Standard Q-Learning
+CST | Spring Semester 2026 | Page 7
+DAM303 Deep Reinforcement Learning Practical 5: Distributional DQN
+Run the TabularQLearning agent from Practical 2 on CartPole-v1 for 400 episodes (it will
+struggle — tabular methods cannot handle continuous states directly). Then compare the
+reward curves and answer:
+5. What reward does standard Q-learning (Practical 2) achieve on CartPole after 400
+episodes? Why is the tabular approach unsuitable for this environment?
+6. Does C51 reach higher average rewards than REINFORCE (Practical 3) in the same
+number of episodes? What advantage does replay buffer give C51?
+7. What information does C51 have that standard DQN does not? Give one scenario
+where knowing the return distribution matters more than knowing just the mean.
+Extension (optional)
+Visualise the return distribution for a specific (state, action) pair at episode 50 vs episode
+400.
+Use matplotlib to plot a bar chart of z
+_
+i vs p_
+i(s,a). How does the distribution change as the
+agent learns?
+5. Report Structure
+1. Introduction — explain distributional RL in plain language
+2. Architecture — describe C51 network input/output, explain the atom support
+3. Projection — explain the distributional Bellman projection in your own words
+4. Results — include your C51 reward curve
+5. Comparison — answer the three questions from Task 5 with plots
+6. Reflection — what was hardest to implement? What does the distribution reveal that
+Q alone does not?
+CST | Spring Semester 2026 | Page 8
